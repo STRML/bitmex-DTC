@@ -1,0 +1,134 @@
+#!/bin/bash
+
+set -x
+
+# $1 : pidfile to check
+# $2 : argument to `kill`
+stop_if_exists () {
+    if [ -f "$2" ]; then
+        kill -s "$1" `cat $2`
+    fi
+}
+
+# $1 sig
+# $2 what
+# $3 test/prod
+stop_bitsouk () {
+    EXT=""
+    if [ "$3" = "test" ]; then
+        EXT="_testnet"
+    fi
+    case "$2" in
+        "data")
+            stop_if_exists "$1" "run/bitmex_data$EXT.pid"
+            ;;
+        "dtc")
+            stop_if_exists "$1" "run/bitmex$EXT.pid"
+            ;;
+        *)
+            echo "Use either 'dtc' or 'data'"
+            ;;
+    esac
+}
+
+# $1 dtc/data
+# $2 prod/test
+# $3 additional arguments
+start_bitsouk () {
+    if [ `hostname` = "parvati" ] || [ `hostname` = "haramis" ] || [ `hostname` = "nerenyi" ]; then
+        TLS=""
+    else
+        TLS="-tls"
+    fi
+    DAEMON="$1"
+    TEST="$2"
+    shift 2
+    case $DAEMON in
+        "data")
+            if [ $TEST = "test" ]; then
+	        ./bitmex_data.native -port 5568 -period 2 -daemon -testnet "$@"
+            else
+	        ./bitmex_data.native -port 5570 -period 2 -daemon "$@"
+            fi
+        ;;
+        "dtc")
+            if [ $TEST = "test" ]; then
+	        ./bitmex.native -port 5567 -daemon $TLS -testnet "$@"
+            else
+	        ./bitmex.native -port 5569 -daemon $TLS "$@"
+            fi
+        ;;
+        *)
+            echo "Use either 'dtc' or 'data'"
+            ;;
+    esac
+}
+
+# $1 dtc/data
+# $2 test/prod
+# $3 action
+process_action () {
+    DAEMON="$1"
+    TEST="$2"
+    ACTION="$3"
+    shift 3
+    case $ACTION in
+        "kill")
+            stop_bitsouk "SIGKILL" $DAEMON $TEST "$@"
+        ;;
+        "stop")
+            stop_bitsouk "SIGTERM" $DAEMON $TEST "$@"
+        ;;
+        "start")
+            start_bitsouk $DAEMON $TEST "$@"
+        ;;
+        "restart")
+            stop_bitsouk "SIGTERM" $DAEMON $TEST "$@"
+            start_bitsouk $DAEMON $TEST "$@"
+        ;;
+        *)
+            echo "Available commands: kill|stop|start|restart"
+            exit 1
+    esac
+}
+
+# $0 start_stop_bitsouk
+# $1 status/dtc/data/dtc_test/data_test
+# $2 action
+SECTION="$1"
+ACTION="$2"
+shift 2
+case $SECTION in
+    "status")
+        ps u -C bitmex.native,bitmex_data.native
+        ;;
+    "dtc")
+        process_action "dtc" "prod" $ACTION "$@"
+	;;
+    "dtc_test")
+        process_action "dtc" "test" $ACTION "$@"
+	;;
+    "data")
+        process_action "data" "prod" $ACTION "$@"
+	;;
+    "data_test")
+        process_action "data" "test" $ACTION "$@"
+	;;
+    "all")
+        process_action "data" "test" $ACTION "$@"
+        process_action "dtc" "test" $ACTION "$@"
+        process_action "data" "prod" $ACTION "$@"
+        process_action "dtc" "prod" $ACTION "$@"
+        ;;
+    "prod")
+        process_action "data" "prod" $ACTION "$@"
+        process_action "dtc" "prod" $ACTION "$@"
+        ;;
+    "test")
+        process_action "data" "test" $ACTION "$@"
+        process_action "dtc" "test" $ACTION "$@"
+        ;;
+    *)
+        echo "Available commands: status|all|test|dtc|dtc_test|data|data_test"
+        exit 1
+esac
